@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4D魔術師—圖形分割與拼砌小遊戲</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 { margin-top: 0; margin-bottom: 10px;}
+        
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 900px;
+            width: 100%;
+        }
+
+        /* 模式工具列 */
+        #toolbar {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .tool-btn {
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            background-color: #e0e0e0;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .tool-btn.active {
+            background-color: #4CAF50;
+            color: white;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .tool-btn:hover:not(.active) {
+            background-color: #d5d5d5;
+        }
+
+        /* 圖形選擇面板 */
+        .shape-selector {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 15px;
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            width: 100%;
+            box-sizing: border-box;
+        }
+        @media (max-width: 600px) {
+            .shape-selector { grid-template-columns: repeat(3, 1fr); }
+        }
+        .shape-btn {
+            padding: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background-color: #f9f9f9;
+            transition: all 0.2s;
+        }
+        .shape-btn:hover {
+            background-color: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+
+        canvas {
+            background-color: white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 8px;
+            touch-action: none;
+            max-width: 100%;
+            height: auto;
+        }
+
+        .instructions {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            width: 100%;
+            box-sizing: border-box;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <h1>4D魔術師—幾何圖形分割與拼砌</h1>
+        
+        <div id="toolbar">
+            <button id="btn-cut" class="tool-btn active" onclick="setMode('cut')">✂️ 分割 (Cut)</button>
+            <button id="btn-move" class="tool-btn" onclick="setMode('move')">🖐️ 移動 (Move)</button>
+            <button id="btn-rotate" class="tool-btn" onclick="setMode('rotate')">🔄 旋轉 (Rotate)</button>
+        </div>
+
+        <div class="shape-selector">
+            <button class="shape-btn" onclick="loadShape('square')">1. 正方形</button>
+            <button class="shape-btn" onclick="loadShape('rect')">2. 長方形</button>
+            <button class="shape-btn" onclick="loadShape('triangle')">3. 三角形</button>
+            <button class="shape-btn" onclick="loadShape('hexagon')">4. 六邊形</button>
+            <button class="shape-btn" onclick="loadShape('star')">5. 五角星</button>
+            <button class="shape-btn" onclick="loadShape('cross')">6. 十字形</button>
+            <button class="shape-btn" onclick="loadShape('arrow')">7. 箭頭</button>
+            <button class="shape-btn" onclick="loadShape('diamond')">8. 菱形</button>
+            <button class="shape-btn" onclick="loadShape('house')">9. 房屋</button>
+            <button class="shape-btn" onclick="loadShape('lShape')">10. L形</button>
+            <button class="shape-btn" onclick="loadShape('trapezoid')">11. 梯形</button>
+            <button class="shape-btn" onclick="loadShape('lightning')">12. 閃電</button>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="640"></canvas>
+
+        <div class="instructions">
+            <strong>💡 玩法說明：</strong><br>
+            1. <strong>精準分割</strong>：在「分割」模式下，滑鼠會自動吸附交點。現在完美支援十字、閃電等複雜圖形的自由切割，切開的各個碎片皆獨立互不影響！<br>
+            2. <strong>磁吸拼砌</strong>：在「移動」模式下，拖曳並放開碎片時，碎片會自動貼齊方格。<br>
+            3. <strong>自由旋轉</strong>：切換至「旋轉」模式，按住碎片邊緣拖曳即可自由改變角度。<br>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let mode = 'cut';
+        let isDragging = false;
+        let startPoint = null;
+        let currentPoint = null;
+        let selectedPolyIndex = -1;
+        
+        const GRID_SIZE = 40;
+
+        const colors = ['#FFADAD', '#FFD6A5', '#FDFFB6', '#CAFFBF', '#9BF6FF', '#A0C4FF', '#BDB2FF', '#FFC6FF', '#E4F1EE', '#F2D7D5'];
+        let colorIndex = 0;
+        function getRandomColor() {
+            colorIndex = (colorIndex + 1) % colors.length;
+            return colors[colorIndex];
+        }
+
+        let polygons = [];
+
+        // 12 種初始圖案 (所有座標皆為 GRID_SIZE 的倍數)
+        const shapePresets = {
+            square: [{x: -120, y: -120}, {x: 120, y: -120}, {x: 120, y: 120}, {x: -120, y: 120}],
+            rect: [{x: -200, y: -120}, {x: 200, y: -120}, {x: 200, y: 120}, {x: -200, y: 120}],
+            triangle: [{x: 0, y: -160}, {x: 160, y: 120}, {x: -160, y: 120}],
+            hexagon: [{x: -80, y: -120}, {x: 80, y: -120}, {x: 160, y: 0}, {x: 80, y: 120}, {x: -80, y: 120}, {x: -160, y: 0}],
+            star: [
+                {x: 0, y: -160}, {x: 40, y: -40}, {x: 160, y: -40}, {x: 80, y: 40}, 
+                {x: 120, y: 160}, {x: 0, y: 80}, {x: -120, y: 160}, {x: -80, y: 40}, 
+                {x: -160, y: -40}, {x: -40, y: -40}
+            ],
+            cross: [
+                {x: -40, y: -120}, {x: 40, y: -120}, {x: 40, y: -40}, {x: 120, y: -40}, 
+                {x: 120, y: 40}, {x: 40, y: 40}, {x: 40, y: 120}, {x: -40, y: 120}, 
+                {x: -40, y: 40}, {x: -120, y: 40}, {x: -120, y: -40}, {x: -40, y: -40}
+            ],
+            arrow: [{x: -120, y: -40}, {x: 40, y: -40}, {x: 40, y: -80}, {x: 160, y: 0}, {x: 40, y: 80}, {x: 40, y: 40}, {x: -120, y: 40}],
+            diamond: [{x: 0, y: -160}, {x: 120, y: 0}, {x: 0, y: 160}, {x: -120, y: 0}],
+            house: [{x: 0, y: -160}, {x: 120, y: -40}, {x: 120, y: 120}, {x: -120, y: 120}, {x: -120, y: -40}],
+            lShape: [{x: -80, y: -120}, {x: 40, y: -120}, {x: 40, y: 40}, {x: 120, y: 40}, {x: 120, y: 120}, {x: -80, y: 120}],
+            trapezoid: [{x: -80, y: -120}, {x: 80, y: -120}, {x: 160, y: 120}, {x: -160, y: 120}],
+            lightning: [{x: 40, y: -120}, {x: -80, y: 0}, {x: -40, y: 0}, {x: -80, y: 120}, {x: 80, y: -40}, {x: 40, y: -40}]
+        };
+
+        function loadShape(type) {
+            let pts = shapePresets[type].map(p => ({x: p.x + canvas.width/2, y: p.y + canvas.height/2}));
+            polygons = [{
+                points: pts,
+                color: getRandomColor()
+            }];
+            selectedPolyIndex = -1;
+            setMode('cut');
+            draw();
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('btn-' + newMode).classList.add('active');
+            
+            if (mode === 'cut') canvas.style.cursor = 'crosshair';
+            else if (mode === 'move') canvas.style.cursor = 'grab';
+            else if (mode === 'rotate') canvas.style.cursor = 'alias';
+            
+            selectedPolyIndex = -1;
+            draw();
+        }
+
+        function drawGrid() {
+            ctx.save();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = '#e4e9ed';
+            for (let x = 0; x <= canvas.width; x += GRID_SIZE) {
+                ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); ctx.stroke();
+            }
+            for (let y = 0; y <= canvas.height; y += GRID_SIZE) {
+                ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); ctx.stroke();
+            }
+
+            ctx.strokeStyle = '#c5d0d8';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.moveTo(0, canvas.height / 2); ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function snapToGrid(pt) {
+            return {
+                x: Math.round(pt.x / GRID_SIZE) * GRID_SIZE,
+                y: Math.round(pt.y / GRID_SIZE) * GRID_SIZE
+            };
+        }
+
+        function getArea(poly) {
+            let area = 0;
+            for(let i=0; i<poly.length; i++) {
+                let j = (i+1)%poly.length;
+                area += poly[i].x * poly[j].y - poly[j].x * poly[i].y;
+            }
+            return Math.abs(area / 2);
+        }
+
+        function getCenter(poly) {
+            let x = 0, y = 0;
+            poly.forEach(p => { x += p.x; y += p.y; });
+            return { x: x / poly.length, y: y / poly.length };
+        }
+
+        function isPointInPoly(pt, poly) {
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                let xi = poly[i].x, yi = poly[i].y;
+                let xj = poly[j].x, yj = poly[j].y;
+                let intersect = ((yi > pt.y) !== (yj > pt.y))
+                    && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        function ccw(A, B, C) {
+            return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+        }
+
+        function segmentIntersect(p1, p2, p3, p4) {
+            return (ccw(p1, p3, p4) !== ccw(p2, p3, p4)) && (ccw(p1, p2, p3) !== ccw(p1, p2, p4));
+        }
+
+        function rotatePoly(poly, center, angleDelta) {
+            let cos = Math.cos(angleDelta);
+            let sin = Math.sin(angleDelta);
+            return poly.map(p => {
+                let dx = p.x - center.x;
+                let dy = p.y - center.y;
+                return {
+                    x: center.x + dx * cos - dy * sin,
+                    y: center.y + dx * sin + dy * cos
+                };
+            });
+        }
+
+        /**
+         * 全新進階切割演算法：支援複雜凹多邊形與多次相交。
+         * 利用微小隨機擾動防止座標完全重合的數學極限，
+         * 並運用類似 Weiler-Atherton 的迴路追蹤法抓出所有碎片。
+         */
+        function splitPolygon(polyPoints, p1, p2) {
+            // 微小偏移以避免頂點恰好落在切割線上造成的數學錯誤
+            const A = { x: p1.x + 0.0013, y: p1.y + 0.0017 };
+            const B = { x: p2.x + 0.0011, y: p2.y + 0.0019 };
+
+            const getSide = (P) => {
+                let val = (P.x - A.x) * (B.y - A.y) - (P.y - A.y) * (B.x - A.x);
+                return val >= 0 ? 1 : -1;
+            };
+
+            let nodes = [];
+            let intersections = [];
+
+            for (let i = 0; i < polyPoints.length; i++) {
+                let P1 = polyPoints[i];
+                let side1 = getSide(P1);
+                nodes.push({
+                    x: P1.x, y: P1.y,
+                    isIntersection: false,
+                    isLeft: side1 > 0,
+                    periNext: null
+                });
+            }
+
+            let augmentedNodes = [];
+            for (let i = 0; i < nodes.length; i++) {
+                let n1 = nodes[i];
+                let n2 = nodes[(i + 1) % nodes.length];
+                augmentedNodes.push(n1);
+
+                if (n1.isLeft !== n2.isLeft) {
+                    // 計算交點
+                    let x1 = A.x, y1 = A.y, x2 = B.x, y2 = B.y;
+                    let x3 = n1.x, y3 = n1.y, x4 = n2.x, y4 = n2.y;
+
+                    let denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+                    if (Math.abs(denom) > 1e-9) {
+                        let tLine = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+                        
+                        let ix = x1 + tLine * (x2 - x1);
+                        let iy = y1 + tLine * (y2 - y1);
+
+                        let iNode = {
+                            x: ix, y: iy,
+                            isIntersection: true,
+                            isLeft: false, // 交點介於兩側
+                            t: tLine,
+                            type: (!n1.isLeft && n2.isLeft) ? 'R2L' : 'L2R',
+                            periNext: null,
+                            pairCutLeft: null,
+                            pairCutRight: null
+                        };
+                        augmentedNodes.push(iNode);
+                        intersections.push(iNode);
+                    }
+                }
+            }
+
+            // 若無交點或交點數量異常(非閉合偶數)，返回原圖
+            if (intersections.length === 0 || intersections.length % 2 !== 0) {
+                return [polyPoints];
+            }
+
+            // 建立原始周長的單向迴路
+            for (let i = 0; i < augmentedNodes.length; i++) {
+                augmentedNodes[i].periNext = augmentedNodes[(i + 1) % augmentedNodes.length];
+            }
+
+            // 根據切割線順序排序交點，確立多邊形內部的切割線段對
+            intersections.sort((a, b) => a.t - b.t);
+
+            for (let i = 0; i < intersections.length; i += 2) {
+                let i1 = intersections[i];
+                let i2 = intersections[i + 1];
+                
+                let rNode = i1.type === 'R2L' ? i1 : i2;
+                let lNode = i1.type === 'L2R' ? i1 : i2;
+
+                // 左圖從 L2R 經內部切割線走到 R2L；右圖則反之
+                lNode.pairCutLeft = rNode;
+                rNode.pairCutRight = lNode;
+            }
+
+            let resultPolys = [];
+
+            // 判斷下一個節點去哪裡
+            function nextLeft(node) {
+                return (node.isIntersection && node.type === 'L2R') ? node.pairCutLeft : node.periNext;
+            }
+            
+            function nextRight(node) {
+                return (node.isIntersection && node.type === 'R2L') ? node.pairCutRight : node.periNext;
+            }
+
+            // 收集所有左側切塊
+            let visitedLeft = new Set();
+            for (let node of augmentedNodes) {
+                if (!visitedLeft.has(node) && (!node.isIntersection && node.isLeft || node.isIntersection)) {
+                    let poly = [];
+                    let curr = node;
+                    let valid = true;
+                    while (!visitedLeft.has(curr)) {
+                        visitedLeft.add(curr);
+                        poly.push({x: curr.x, y: curr.y});
+                        curr = nextLeft(curr);
+                        if (!curr) { valid = false; break; }
+                    }
+                    if (valid && poly.length >= 3 && getArea(poly) > 5) {
+                        resultPolys.push(poly);
+                    }
+                }
+            }
+
+            // 收集所有右側切塊
+            let visitedRight = new Set();
+            for (let node of augmentedNodes) {
+                if (!visitedRight.has(node) && (!node.isIntersection && !node.isLeft || node.isIntersection)) {
+                    let poly = [];
+                    let curr = node;
+                    let valid = true;
+                    while (!visitedRight.has(curr)) {
+                        visitedRight.add(curr);
+                        poly.push({x: curr.x, y: curr.y});
+                        curr = nextRight(curr);
+                        if (!curr) { valid = false; break; }
+                    }
+                    if (valid && poly.length >= 3 && getArea(poly) > 5) {
+                        resultPolys.push(poly);
+                    }
+                }
+            }
+
+            return resultPolys.length > 0 ? resultPolys : [polyPoints];
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawGrid();
+            
+            polygons.forEach((poly, index) => {
+                ctx.beginPath();
+                ctx.moveTo(poly.points[0].x, poly.points[0].y);
+                for(let i=1; i<poly.points.length; i++) {
+                    ctx.lineTo(poly.points[i].x, poly.points[i].y);
+                }
+                ctx.closePath();
+                ctx.fillStyle = poly.color;
+                ctx.fill();
+                
+                ctx.strokeStyle = '#333';
+                if (index === selectedPolyIndex && mode !== 'cut') {
+                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = '#000';
+                } else {
+                    ctx.lineWidth = 2;
+                }
+                ctx.stroke();
+            });
+            
+            if (mode === 'cut' && isDragging && startPoint && currentPoint) {
+                ctx.beginPath();
+                ctx.moveTo(startPoint.x, startPoint.y);
+                ctx.lineTo(currentPoint.x, currentPoint.y);
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 8]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                ctx.fillStyle = '#ff0000';
+                ctx.beginPath(); ctx.arc(startPoint.x, startPoint.y, 5, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(currentPoint.x, currentPoint.y, 5, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+
+        function getMousePos(e) {
+            let rect = canvas.getBoundingClientRect();
+            let scaleX = canvas.width / rect.width;
+            let scaleY = canvas.height / rect.height;
+            return { 
+                x: (e.clientX - rect.left) * scaleX, 
+                y: (e.clientY - rect.top) * scaleY 
+            };
+        }
+
+        canvas.addEventListener('pointerdown', e => {
+            canvas.setPointerCapture(e.pointerId);
+            let pt = getMousePos(e);
+            
+            if (mode === 'cut') {
+                startPoint = snapToGrid(pt);
+                currentPoint = startPoint;
+                isDragging = true;
+            } else {
+                selectedPolyIndex = -1;
+                for (let i = polygons.length - 1; i >= 0; i--) {
+                    if (isPointInPoly(pt, polygons[i].points)) {
+                        selectedPolyIndex = i;
+                        break;
+                    }
+                }
+                if (selectedPolyIndex !== -1) {
+                    isDragging = true;
+                    startPoint = pt;
+                    currentPoint = pt;
+                    
+                    let selected = polygons.splice(selectedPolyIndex, 1)[0];
+                    polygons.push(selected);
+                    selectedPolyIndex = polygons.length - 1;
+                    
+                    if (mode === 'move') canvas.style.cursor = 'grabbing';
+                }
+            }
+            draw();
+        });
+
+        canvas.addEventListener('pointermove', e => {
+            let pt = getMousePos(e);
+            
+            if (isDragging) {
+                if (mode === 'cut') {
+                    currentPoint = snapToGrid(pt);
+                } else if (mode === 'move') {
+                    let dx = pt.x - currentPoint.x;
+                    let dy = pt.y - currentPoint.y;
+                    polygons[selectedPolyIndex].points.forEach(p => {
+                        p.x += dx;
+                        p.y += dy;
+                    });
+                    currentPoint = pt;
+                } else if (mode === 'rotate') {
+                    let center = getCenter(polygons[selectedPolyIndex].points);
+                    let angle1 = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
+                    let angle2 = Math.atan2(pt.y - center.y, pt.x - center.x);
+                    let delta = angle2 - angle1;
+                    polygons[selectedPolyIndex].points = rotatePoly(polygons[selectedPolyIndex].points, center, delta);
+                    currentPoint = pt;
+                }
+                draw();
+            } else {
+                if (mode !== 'cut') {
+                    let hover = false;
+                    for (let i = polygons.length - 1; i >= 0; i--) {
+                        if (isPointInPoly(pt, polygons[i].points)) {
+                            hover = true;
+                            break;
+                        }
+                    }
+                    if (mode === 'move') canvas.style.cursor = hover ? 'grab' : 'default';
+                    if (mode === 'rotate') canvas.style.cursor = hover ? 'alias' : 'default';
+                }
+            }
+        });
+
+        canvas.addEventListener('pointerup', e => {
+            if (isDragging) {
+                if (mode === 'cut') {
+                    if (startPoint.x !== currentPoint.x || startPoint.y !== currentPoint.y) {
+                        let newPolygons = [];
+                        for (let i = 0; i < polygons.length; i++) {
+                            let poly = polygons[i];
+                            let intersects = false;
+                            
+                            for (let j = 0; j < poly.points.length; j++) {
+                                let next = (j + 1) % poly.points.length;
+                                if (segmentIntersect(startPoint, currentPoint, poly.points[j], poly.points[next])) {
+                                    intersects = true;
+                                    break;
+                                }
+                            }
+                            if (!intersects && isPointInPoly(startPoint, poly.points) && isPointInPoly(currentPoint, poly.points)) {
+                                intersects = true; 
+                            }
+                            
+                            if (intersects) {
+                                let splitResult = splitPolygon(poly.points, startPoint, currentPoint);
+                                if (splitResult.length > 1) {
+                                    // 賦予原始圖形顏色給第一塊，後續產生的獨立碎片隨機新色
+                                    newPolygons.push({points: splitResult[0], color: poly.color});
+                                    for (let k = 1; k < splitResult.length; k++) {
+                                        newPolygons.push({points: splitResult[k], color: getRandomColor()});
+                                    }
+                                } else {
+                                    newPolygons.push(poly);
+                                }
+                            } else {
+                                newPolygons.push(poly);
+                            }
+                        }
+                        polygons = newPolygons;
+                    }
+                } else if (mode === 'move') {
+                    let firstPt = polygons[selectedPolyIndex].points[0];
+                    let offsetX = Math.round(firstPt.x / GRID_SIZE) * GRID_SIZE - firstPt.x;
+                    let offsetY = Math.round(firstPt.y / GRID_SIZE) * GRID_SIZE - firstPt.y;
+                    
+                    polygons[selectedPolyIndex].points.forEach(p => {
+                        p.x += offsetX;
+                        p.y += offsetY;
+                    });
+                }
+                
+                isDragging = false;
+                startPoint = null;
+                currentPoint = null;
+                
+                if (mode === 'move') canvas.style.cursor = 'grab';
+                draw();
+            }
+        });
+
+        loadShape('square');
+    </script>
+</body>
+</html>
+```eof
